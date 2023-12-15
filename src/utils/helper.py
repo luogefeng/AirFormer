@@ -18,14 +18,14 @@ def get_dataloader(datapath, batch_size, output_dim, mode='train'):
         data['y_' + category] = cat_data['y']
 
     scalers = []
-    for i in range(output_dim):
+    for i in range(output_dim):    
         scalers.append(StandardScaler(mean=data['x_train'][..., i].mean(),
-                                      std=data['x_train'][..., i].std()))
+                                      std=data['x_train'][..., i].std()))    
 
     # Data format
     for category in ['train', 'val', 'test']:
         # normalize the target series (generally, one kind of series)
-        for i in range(output_dim):
+        for i in range(output_dim):   
             data['x_' + category][..., i] = scalers[i].transform(data['x_' + category][..., i])
             data['y_' + category][..., i] = scalers[i].transform(data['y_' + category][..., i])
 

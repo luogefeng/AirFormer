@@ -11,11 +11,30 @@ from scipy.sparse import linalg
 import torch.nn as nn
 import torch
 
+import sys
+sys.path.append("/home/yuxuan/lgf/AirFormer")
 from src.utils.helper import get_dataloader, check_device, get_num_nodes
 from src.utils.metrics import masked_mae
 from src.models.airformer import AirFormer
 from src.utils.graph_algo import load_graph_data
 from src.utils.args import get_public_config, str_to_bool
+
+
+import random
+def seed_torch(seed=1029):
+  #随机数种子1029
+  random.seed(seed)
+  os.environ['PYTHONHASHSEED'] = str(seed) # 为了禁止hash随机化，使得实验可复现
+  np.random.seed(seed)
+  torch.manual_seed(seed)
+  torch.cuda.manual_seed(seed)
+  torch.cuda.manual_seed_all(seed) # if you are using multi-GPU.
+  torch.backends.cudnn.benchmark = False
+  torch.backends.cudnn.deterministic = True
+
+seed_torch() 
+
+
 
 
 def get_config():
@@ -25,7 +44,7 @@ def get_config():
     parser.add_argument('--model_name', type=str, default='airformer',
                         help='which model to train')
     parser.add_argument('--dropout', type=float, default=0.3)
-    parser.add_argument('--filter_type', type=str, default='doubletransition')
+    parser.add_argument('--filter_type', type=str, default='doubletransition')  #what?
     parser.add_argument('--n_hidden', type=int, default=32)
     parser.add_argument('--num_heads', type=int, default=2)
     parser.add_argument('--dartboard', type=int, default=0,
@@ -38,7 +57,7 @@ def get_config():
     parser.add_argument('--base_lr', type=float, default=5e-4)
     parser.add_argument('--lr_decay_ratio', type=float, default=0.5)
     args = parser.parse_args()
-    args.steps = [12000]
+    args.steps = [12000]  #这个step的作用？
     print(args)
 
     folder_name = '{}-{}-{}-{}-{}-{}-{}'.format(args.n_hidden,
@@ -51,7 +70,7 @@ def get_config():
     args.log_dir = './logs/{}/{}/{}/'.format(args.dataset,
                                              args.model_name,
                                              folder_name)
-    args.num_nodes = get_num_nodes(args.dataset)
+    args.num_nodes = get_num_nodes(args.dataset)   #dataset有1085站点
 
     # you can ignore the following code (they are for GNN baselines)
     if args.filter_type == 'scalap':
@@ -78,23 +97,26 @@ def main():
     model = AirFormer(dropout=args.dropout,
                       spatial_flag=args.spatial_flag,
                       stochastic_flag=args.stochastic_flag,
-                      hidden_channels=args.n_hidden,
+                      hidden_channels=args.n_hidden,   #是什么？与end_channels什么关系？
                       dartboard=args.dartboard,
-                      end_channels=args.n_hidden * 8,
+                      end_channels=args.n_hidden * 8,  
                       num_heads=args.num_heads,
                       name=args.model_name,
                       dataset=args.dataset,
                       device=device,
                       num_nodes=args.num_nodes,
-                      seq_len=args.seq_len,
-                      horizon=args.horizon,
-                      input_dim=args.input_dim,
-                      output_dim=args.output_dim)
+                      seq_len=args.seq_len,    #what?
+                      horizon=args.horizon,    #what?
+                      input_dim=args.input_dim,  #default=27
+                      output_dim=args.output_dim) #default=1
 
     data = get_dataloader(args.datapath,
                           args.batch_size,
                           args.output_dim)
 
+    # for name, param in model.named_parameters():
+    #   print(f"Parameter name: {name}, Shape: {param.shape}")
+    
     if args.stochastic_flag:
         from src.trainers.airformer_stochastic_trainer import Trainer
     else:

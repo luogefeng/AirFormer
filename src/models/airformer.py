@@ -5,6 +5,8 @@ from src.base.model import BaseModel
 from src.layers.embedding import AirEmbedding
 import numpy as np
 
+import torch.nn.init as init
+
 dartboard_map = {0: '50-200',
                  1: '50-200-500',
                  2: '50',
@@ -143,11 +145,11 @@ class AirFormer(BaseModel):
                                          num_time=self.seq_len, device=self.device))
 
             if self.spatial_flag:
-                self.s_modules.append(DS_MSA(hidden_channels,
+                self.s_modules.append(DS_MSA(hidden_channels,   #这里是什么？
                                              depth=1,
                                              heads=num_heads,
                                              mlp_dim=hidden_channels*mlp_expansion,
-                                             assignment=self.assignment,
+                                             modified_assignment=self.modified_assignment, #修改self.assignment,将作为mask的矩阵传进去
                                              mask=self.mask,
                                              dropout=dropout))
             else:
@@ -157,7 +159,7 @@ class AirFormer(BaseModel):
 
             self.bn.append(nn.BatchNorm2d(hidden_channels))
 
-        # create the generrative and inference model
+        # create the generative and inference model
         if stochastic_flag:
             self.generative_model = StochasticModel(
                 hidden_channels, hidden_channels, blocks)
@@ -197,12 +199,25 @@ class AirFormer(BaseModel):
         get dartboard-related attributes
         '''
         path_assignment = 'data/local_partition/' + \
-            dartboard_map[dartboard] + '/assignment.npy'
+            dartboard_map[dartboard] + '/modified_assignment.npy'  
+            #将assignment.npy改成modified_assignment.npy，这里的modified_assignment
+            #实际上相当于一个mask矩阵，station属于region，相应的位置为1，否则为0
+            #为之后的与学习矩阵相乘做准备
+            
         path_mask = 'data/local_partition/' + \
             dartboard_map[dartboard] + '/mask.npy'
         print(path_assignment)
-        self.assignment = torch.from_numpy(
-            np.load(path_assignment)).float().to(self.device)
+        
+        #modified_assignment矩阵只作为中间计算mask使用，不再需要to device
+        # self.assignment = torch.from_numpy(
+        #     np.load(path_assignment)).float().to(self.device)
+        self.modified_assignment = torch.from_numpy(
+            np.load(path_assignment)).int().to(self.device)
+        # print("modified_assignment")
+        # print(self.modified_assignment.data[:1])
+        
+
+
         self.mask = torch.from_numpy(
             np.load(path_mask)).bool().to(self.device)
 
@@ -286,7 +301,7 @@ class SpatialAttention(nn.Module):
                  qk_scale=None,
                  dropout=0.,
                  num_sectors=17,
-                 assignment=None,
+                 modified_assignment=None, #这里改为用全为0,1的mask矩阵，与原来的assignment矩阵大小相同
                  mask=None):
         super().__init__()
         assert dim % heads == 0, f"dim {dim} should be divided by num_heads {heads}."
@@ -296,21 +311,68 @@ class SpatialAttention(nn.Module):
         head_dim = dim // heads
         self.scale = qk_scale or head_dim ** -0.5
         self.num_sector = num_sectors
-        self.assignment = assignment  # [n, n, num_sector]
+        self.modified_assignment = modified_assignment  # [n, n, num_sector] #这里改为用全为0,1的mask矩阵，与原来的assignment矩阵大小相同
         self.mask = mask  # [n, num_sector]
 
         self.q_linear = nn.Linear(dim, dim, bias=qkv_bias)
         self.kv_linear = nn.Linear(dim, dim * 2, bias=qkv_bias)
 
         self.relative_bias = nn.Parameter(torch.randn(heads, 1, num_sectors))
-        self.proj = nn.Linear(dim, dim)
+        
+        self.proj = nn.Linear(dim, dim)        
         self.proj_drop = nn.Dropout(dropout)
+        
+        
+        #获取modified_assignment的维度数据
+        d1,d2,d3=self.modified_assignment.shape
+        #加一个可学习的权重矩阵，初始值随机
+        self.weight_matrix = nn.Parameter((torch.randn(d1, d2, d3)))
+        # self.weight_matrix.data = torch.clamp(self.weight_matrix.data,min=0.1,max=1)
+        # init.xavier_uniform_(self.weight_matrix)
+
+        # self.linear = nn.Linear(1085, 17)
+        # self.sig = nn.Sigmoid()
+        # self.weight = nn.Parameter(torch.abs(torch.randn(d1, d2, d3)))
+        # self.weight=torch.from_numpy(np.load(path_assignment)).float().to(self.device)
+        # print("weight")
+        # print(self.weight.data[:1])
+
 
     def forward(self, x):
         # x: [b, n, c]
-
         B, N, C = x.shape
+        # x = x.permute(0, 2, 1)
+        # x = self.linear(x)
+        # x = x.permute(0, 2, 1)
+        
+        #可学习的权重矩阵与mask逐项相乘
+        self.weight_matrix.data = torch.clamp(self.weight_matrix.data, min=0,max=1)
+        
+        mask_weight = self.weight_matrix * self.modified_assignment
 
+        #保证可学习的权重矩阵每一行加起来都等于1.
+        non_zero_count = torch.sum(mask_weight, dim=1, keepdim=True)
+        # self.assignment = torch.where(
+        #     non_zero_count > 0, mask_weight / non_zero_count, mask_weight
+        # )
+        epsilon = 1e-8
+        non_zero_count_safe = non_zero_count + epsilon
+        self.assignment = mask_weight / non_zero_count_safe
+        
+        
+        # EPSILON = 1e-8  # 定义一个小的非零值
+
+        # non_zero_count = torch.sum(mask_weight, dim=1, keepdim=True)
+        # non_zero_count = torch.where(non_zero_count > 0, non_zero_count, torch.tensor(EPSILON).to(mask_weight.device))
+
+        # self.assignment = torch.where(non_zero_count > 0, mask_weight / non_zero_count, mask_weight)
+        
+        # self.assignment=mask_weight
+
+
+        
+
+        
         # query: [bn, 1, c]
         # key/value target: [bn, num_sector, c]
         # [b, n, num_sector, c]
@@ -348,7 +410,7 @@ class DS_MSA(nn.Module):
                  depth,  # number of MSA in DS-MSA
                  heads,  # number of heads
                  mlp_dim,  # mlp dimension
-                 assignment,  # dartboard assignment matrix
+                 modified_assignment,  # dartboard assignment matrix #修改后是全为0,1的mask矩阵
                  mask,  # mask
                  dropout=0.):  # dropout rate
         super().__init__()
@@ -356,8 +418,9 @@ class DS_MSA(nn.Module):
         for i in range(depth):
             self.layers.append(nn.ModuleList([
                 SpatialAttention(dim, heads=heads, dropout=dropout,
-                                 assignment=assignment, mask=mask,
-                                 num_sectors=assignment.shape[-1]),
+                                 modified_assignment=modified_assignment, #这里改为用全为0,1的mask矩阵，与原来的assignment矩阵大小相同
+                                 mask=mask,
+                                 num_sectors=modified_assignment.shape[-1]), #这里改为用全为0,1的mask矩阵，与原来的assignment矩阵大小相同
                 PreNorm(dim, FeedForward(dim, mlp_dim, dropout=dropout))
             ]))
 

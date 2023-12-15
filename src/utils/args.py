@@ -21,7 +21,7 @@ def get_public_config():
     # data
     parser.add_argument('--dataset', type=str, default='AIR_TINY')
     parser.add_argument('--batch_size', type=int, default=16)
-    parser.add_argument('--aug', type=float, default=1.0)
+    parser.add_argument('--aug', type=float, default=1.0)   #what?
     parser.add_argument('--seq_len', type=int, default=24)
     parser.add_argument('--horizon', type=int, default=24)
     parser.add_argument('--input_dim', type=int, default=27)
