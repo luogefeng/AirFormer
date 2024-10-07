@@ -5,26 +5,26 @@ from src.base.model import BaseModel
 from src.layers.embedding import AirEmbedding
 import numpy as np
 
-dartboard_map = {0: '50-200',
-                 1: '50-200-500',
-                 2: '50',
-                 3: '25-100-250'}
+dartboard_map = {0: '50-200', 1: '50-200-500', 2: '50', 3: '25-100-250'}
 
-class LatentLayer(nn.Module):  
+
+class LatentLayer(nn.Module):
     '''
     The latent layer to compute mean and std
     '''
-    def __init__(self,
-                 dm_dim,  # the dimension of deterministic states
-                 latent_dim_in,  # the dimension of input latent variables
-                 latent_dim_out,  # the dimension of output latent variables
-                 hidden_dim,  # the intermediate dimension
-                 num_layers=2):
+
+    def __init__(
+            self,
+            dm_dim,  # the dimension of deterministic states
+            latent_dim_in,  # the dimension of input latent variables
+            latent_dim_out,  # the dimension of output latent variables
+            hidden_dim,  # the intermediate dimension
+            num_layers=2):
         super(LatentLayer, self).__init__()
 
         self.num_layers = num_layers
         self.enc_in = nn.Sequential(
-            nn.Conv2d(dm_dim+latent_dim_in, hidden_dim, 1))
+            nn.Conv2d(dm_dim + latent_dim_in, hidden_dim, 1))
 
         layers = []
         for _ in range(num_layers):
@@ -39,8 +39,8 @@ class LatentLayer(nn.Module):
         h = self.enc_in(x)
         for i in range(self.num_layers):
             h = self.enc_hidden[i](h)
-        mu = torch.minimum(self.enc_out_1(h), torch.ones_like(h)*10)
-        sigma = torch.minimum(self.enc_out_2(h), torch.ones_like(h)*10)
+        mu = torch.minimum(self.enc_out_1(h), torch.ones_like(h) * 10)
+        sigma = torch.minimum(self.enc_out_2(h), torch.ones_like(h) * 10)
         return mu, sigma
 
 
@@ -49,33 +49,26 @@ class StochasticModel(nn.Module):
     The generative model.
     The inference model can also use this implementation, while the input should be shifted
     '''
-    def __init__(self,
-                 dm_dim,  # the dimension of the deterministic states
-                 latent_dim,  # the dimension of the latent variables
-                 num_blocks=4):
+
+    def __init__(
+            self,
+            dm_dim,  # the dimension of the deterministic states
+            latent_dim,  # the dimension of the latent variables
+            num_blocks=4):
 
         super(StochasticModel, self).__init__()
         self.layers = nn.ModuleList()
 
         # the bottom n-1 layers
-        for _ in range(num_blocks-1):
+        for _ in range(num_blocks - 1):
             self.layers.append(
-                LatentLayer(dm_dim,
-                            latent_dim,
-                            latent_dim,
-                            latent_dim,
-                            2))
+                LatentLayer(dm_dim, latent_dim, latent_dim, latent_dim, 2))
         # the top layer
-        self.layers.append(
-            LatentLayer(dm_dim,
-                        0,
-                        latent_dim,
-                        latent_dim,
-                        2))
+        self.layers.append(LatentLayer(dm_dim, 0, latent_dim, latent_dim, 2))
 
     def reparameterize(self, mu, sigma):
         eps = torch.randn_like(sigma, requires_grad=False)
-        return mu + eps*sigma
+        return mu + eps * sigma
 
     def forward(self, d):
         # d: [num_blocks, b, c, n, t]
@@ -86,7 +79,7 @@ class StochasticModel(nn.Module):
         sigmas = [_sigma]
         z = [self.reparameterize(_mu, _sigma)]
 
-        for i in reversed(range(len(self.layers)-1)):
+        for i in reversed(range(len(self.layers) - 1)):
             _mu, _logsigma = self.layers[i](torch.cat((d[i], z[-1]), dim=1))
             _sigma = torch.exp(_logsigma) + 1e-3
             mus.append(_mu)
@@ -98,21 +91,24 @@ class StochasticModel(nn.Module):
         sigmas = torch.stack(sigmas)
         return z, mus, sigmas
 
+
 class AirFormer(BaseModel):
     '''
     the AirFormer model
     '''
-    def __init__(self,
-                 dropout=0.3,  # dropout rate
-                 spatial_flag=True,  # whether to use DS-MSA
-                 stochastic_flag=True,  # whether to use latent vairables
-                 hidden_channels=32,  # hidden dimension
-                 end_channels=512,  # the decoder dimension
-                 blocks=4,  # the number of stacked AirFormer blocks
-                 mlp_expansion=2,  # the mlp expansion rate in transformers
-                 num_heads=2,  # the number of heads
-                 dartboard=0,  # the type of dartboard
-                 **args):
+
+    def __init__(
+            self,
+            dropout=0.3,  # dropout rate
+            spatial_flag=True,  # whether to use DS-MSA
+            stochastic_flag=True,  # whether to use latent vairables
+            hidden_channels=32,  # hidden dimension
+            end_channels=512,  # the decoder dimension
+            blocks=4,  # the number of stacked AirFormer blocks
+            mlp_expansion=2,  # the mlp expansion rate in transformers
+            num_heads=2,  # the number of heads
+            dartboard=0,  # the type of dartboard
+            **args):
         super(AirFormer, self).__init__(**args)
         self.dropout = dropout
         self.blocks = blocks
@@ -134,35 +130,40 @@ class AirFormer(BaseModel):
                                     kernel_size=(1, 1))
 
         for b in range(blocks):
-            window_size = self.seq_len // 2 ** (blocks - b - 1)
-            self.t_modules.append(CT_MSA(hidden_channels,
-                                         depth=1,
-                                         heads=num_heads,
-                                         window_size=window_size,
-                                         mlp_dim=hidden_channels*mlp_expansion,
-                                         num_time=self.seq_len, device=self.device))
+            window_size = self.seq_len // 2**(blocks - b - 1)
+            self.t_modules.append(
+                CT_MSA(hidden_channels,
+                       depth=1,
+                       heads=num_heads,
+                       window_size=window_size,
+                       mlp_dim=hidden_channels * mlp_expansion,
+                       num_time=self.seq_len,
+                       device=self.device))
 
             if self.spatial_flag:
-                self.s_modules.append(DS_MSA(hidden_channels,
-                                             depth=1,
-                                             heads=num_heads,
-                                             mlp_dim=hidden_channels*mlp_expansion,
-                                             assignment=self.assignment,
-                                             mask=self.mask,
-                                             dropout=dropout))
+                self.s_modules.append(
+                    DS_MSA(hidden_channels,
+                           depth=1,
+                           heads=num_heads,
+                           mlp_dim=hidden_channels * mlp_expansion,
+                           assignment=self.assignment,
+                           mask=self.mask,
+                           device=self.device,
+                           dropout=dropout))
             else:
-                self.residual_convs.append(nn.Conv1d(in_channels=hidden_channels,
-                                                     out_channels=hidden_channels,
-                                                     kernel_size=(1, 1)))
+                self.residual_convs.append(
+                    nn.Conv1d(in_channels=hidden_channels,
+                              out_channels=hidden_channels,
+                              kernel_size=(1, 1)))
 
             self.bn.append(nn.BatchNorm2d(hidden_channels))
 
         # create the generrative and inference model
         if stochastic_flag:
-            self.generative_model = StochasticModel(
-                hidden_channels, hidden_channels, blocks)
-            self.inference_model = StochasticModel(
-                hidden_channels, hidden_channels, blocks)
+            self.generative_model = StochasticModel(hidden_channels,
+                                                    hidden_channels, blocks)
+            self.inference_model = StochasticModel(hidden_channels,
+                                                   hidden_channels, blocks)
 
             self.reconstruction_model = \
                 nn.Sequential(nn.Conv2d(in_channels=hidden_channels*blocks,
@@ -178,17 +179,19 @@ class AirFormer(BaseModel):
 
         # create the decoder layers
         if self.stochastic_flag:
-            self.end_conv_1 = nn.Conv2d(in_channels=hidden_channels*blocks*2,
+            self.end_conv_1 = nn.Conv2d(in_channels=hidden_channels * blocks *
+                                        2,
                                         out_channels=end_channels,
                                         kernel_size=(1, 1),
                                         bias=True)
         else:
-            self.end_conv_1 = nn.Conv2d(in_channels=hidden_channels*blocks,
+            self.end_conv_1 = nn.Conv2d(in_channels=hidden_channels * blocks,
                                         out_channels=end_channels,
                                         kernel_size=(1, 1),
                                         bias=True)
         self.end_conv_2 = nn.Conv2d(in_channels=end_channels,
-                                    out_channels=self.horizon*self.output_dim,
+                                    out_channels=self.horizon *
+                                    self.output_dim,
                                     kernel_size=(1, 1),
                                     bias=True)
 
@@ -203,8 +206,7 @@ class AirFormer(BaseModel):
         print(path_assignment)
         self.assignment = torch.from_numpy(
             np.load(path_assignment)).float().to(self.device)
-        self.mask = torch.from_numpy(
-            np.load(path_mask)).bool().to(self.device)
+        self.mask = torch.from_numpy(np.load(path_mask)).bool().to(self.device)
 
     def forward(self, inputs, supports=None):
         '''
@@ -244,15 +246,17 @@ class AirFormer(BaseModel):
             # compute kl divergence loss
             p = torch.distributions.Normal(mu_p, sigma_p)
             q = torch.distributions.Normal(mu_q, sigma_q)
-            kl_loss = torch.distributions.kl_divergence(
-                q, p).mean() * self.alpha
+            kl_loss = torch.distributions.kl_divergence(q,
+                                                        p).mean() * self.alpha
 
             # reshaping
             num_blocks, B, C, N, T = d.shape
-            z_p = z_p.permute(1, 0, 2, 3, 4).reshape(
-                B, -1, N, T)  # [B, num_blocks*C, N, T]
-            z_q = z_q.permute(1, 0, 2, 3, 4).reshape(
-                B, -1, N, T)  # [B, num_blocks*C, N, T]
+            z_p = z_p.permute(1, 0, 2, 3,
+                              4).reshape(B, -1, N,
+                                         T)  # [B, num_blocks*C, N, T]
+            z_q = z_q.permute(1, 0, 2, 3,
+                              4).reshape(B, -1, N,
+                                         T)  # [B, num_blocks*C, N, T]
 
             # reconstruction
             x_rec = self.reconstruction_model(z_p)  # [b, c, n, t]
@@ -260,8 +264,8 @@ class AirFormer(BaseModel):
 
             # prediction
             num_blocks, B, C, N, T = d.shape
-            d = d.permute(1, 0, 2, 3, 4).reshape(
-                B, -1, N, T)  # [B, num_blocks*C, N, T]
+            d = d.permute(1, 0, 2, 3, 4).reshape(B, -1, N,
+                                                 T)  # [B, num_blocks*C, N, T]
             x_hat = torch.cat([d[..., -1:], z_q[..., -1:]], dim=1)
             x_hat = F.relu(self.end_conv_1(x_hat))
             x_hat = self.end_conv_2(x_hat)
@@ -269,8 +273,8 @@ class AirFormer(BaseModel):
 
         else:
             num_blocks, B, C, N, T = d.shape
-            d = d.permute(1, 0, 2, 3, 4).reshape(
-                B, -1, N, T)  # [B, num_blocks*C, N, T]
+            d = d.permute(1, 0, 2, 3, 4).reshape(B, -1, N,
+                                                 T)  # [B, num_blocks*C, N, T]
             x_hat = F.relu(d[..., -1:])
             x_hat = F.relu(self.end_conv_1(x_hat))
             x_hat = self.end_conv_2(x_hat)
@@ -280,6 +284,7 @@ class AirFormer(BaseModel):
 class SpatialAttention(nn.Module):
     # dartboard project + MSA
     def __init__(self,
+                 device,
                  dim,
                  heads=4,
                  qkv_bias=False,
@@ -294,7 +299,7 @@ class SpatialAttention(nn.Module):
         self.dim = dim
         self.num_heads = heads
         head_dim = dim // heads
-        self.scale = qk_scale or head_dim ** -0.5
+        self.scale = qk_scale or head_dim**-0.5
         self.num_sector = num_sectors
         self.assignment = assignment  # [n, n, num_sector]
         self.mask = mask  # [n, num_sector]
@@ -306,34 +311,120 @@ class SpatialAttention(nn.Module):
         self.proj = nn.Linear(dim, dim)
         self.proj_drop = nn.Dropout(dropout)
 
-    def forward(self, x):
-        # x: [b, n, c]
+        self.device = device
+        self.get_station_info()
 
+        # 设置两个变量，分别代表小圆的半径 和 大圆半径与小圆半径的差值，两个值都需要保证为正数
+        self.radius_short_vector = nn.Parameter(
+            torch.abs(torch.randn(self.num_station)) * 50)
+
+        self.radius_res_vector = nn.Parameter(
+            torch.abs(torch.randn(self.num_station)) * 50)
+
+    def get_station_info(self):
+        '''
+        get dartboard-related attributes
+        '''
+        path_distance = 'data/stations/distances.npy'
+        path_bearing = 'data/stations/bearing.npz'
+        path_intervals = 'data/stations/intervals_all.npy'
+
+        self.distance = torch.from_numpy(np.load(path_distance)).float().to(
+            self.device)
+
+        # data_bearing=np.load(path_bearing)
+        # bearings=[torch.from_numpy(data_bearing[f'bearing{i}']) for i in range(len(data_bearing))]
+        # bearing=torch.stack(bearings,dim=0)
+        # self.bearing=bearing.type(torch.int8).to(self.device)
+
+        self.intervals = torch.from_numpy(np.load(path_intervals)).int().to(
+            self.device)
+
+        self.num_station = 1085
+
+        # path_assignment = 'data/local_partition/' + \
+        #     dartboard_map[dartboard] + '/assignment.npy'
+        # path_mask = 'data/local_partition/' + \
+        #     dartboard_map[dartboard] + '/mask.npy'
+        # print(path_assignment)
+        # self.assignment = torch.from_numpy(
+        #     np.load(path_assignment)).float().to(self.device)
+        # self.mask = torch.from_numpy(
+        #     np.load(path_mask)).bool().to(self.device)
+
+    def forward(self, x):
+
+        #为了自适应半径添加的代码
+
+        #将原先大小为num_station的代表半径的张量扩展为 num_station*num_station的张量，其中每一行的数字都完全一样
+        radius_short = torch.abs(self.radius_short_vector).unsqueeze(1).expand(
+            -1, self.num_station)
+        radius_long = torch.abs(self.radius_res_vector).unsqueeze(1).expand(
+            -1, self.num_station) + radius_short
+
+        #用1表示在小圆内部，用0表示在小圆外部
+        beta = 10
+        # circle_small=torch.sigmoid(beta*(radius_short-self.distance))
+        # circle_big=torch.sigmoid(beta*(radius_long-self.distance))
+        circle_small = ((radius_short - self.distance) > 0).int()
+        circle_big = ((radius_long - self.distance) > 0).int()
+        circle_between = (circle_big * (1 - circle_small))
+
+        #将self.bearing中的8个1085*1085的矩阵分别乘以circle_small,circle_between
+        #得到16个新的1085*1085的矩阵
+        #然后将这16个矩阵拼接起来，得到一个1085*1085*16的张量
+
+        assignment_dynamic_temp = torch.cat(
+            (self.intervals * circle_small.unsqueeze(0),
+             self.intervals * circle_between.unsqueeze(0)),
+            dim=0).permute(1, 2, 0)
+        # 创建形状为 (1085, 1085) 的单位向量
+        unit_vector = torch.ones(self.num_station,
+                                 self.num_station).unsqueeze(-1)
+        assignment_dynamic = torch.cat(
+            (assignment_dynamic_temp, unit_vector.to(self.device)), dim=2)
+
+        assignment_dynamic = F.softmax(assignment_dynamic, dim=1)
+        #根据每个assignment矩阵创建 Mask矩阵
+        mask_dynamic=(assignment_dynamic==0).all(dim=1).bool()
+
+        # x: [b, n, c]
         B, N, C = x.shape
 
         # query: [bn, 1, c]
         # key/value target: [bn, num_sector, c]
         # [b, n, num_sector, c]
-        pre_kv = torch.einsum('bnc,mnr->bmrc', x, self.assignment)
+
+
+        #将self.assignment替换为assignment_dynamic
+        # pre_kv = torch.einsum('bnc,mnr->bmrc', x, self.assignment)
+        pre_kv = torch.einsum('bnc,mnr->bmrc', x, assignment_dynamic)
+
 
         pre_kv = pre_kv.reshape(-1, self.num_sector, C)  # [bn, num_sector, c]
         pre_q = x.reshape(-1, 1, C)  # [bn, 1, c]
 
-        q = self.q_linear(pre_q).reshape(B*N, -1, self.num_heads, C //
-                                         self.num_heads).permute(0, 2, 1, 3)  # [bn, num_heads, 1, c//num_heads]
-        kv = self.kv_linear(pre_kv).reshape(B*N, -1, 2, self.num_heads,
-                                            C // self.num_heads).permute(2, 0, 3, 1, 4)
+        q = self.q_linear(pre_q).reshape(
+            B * N, -1, self.num_heads,
+            C // self.num_heads).permute(0, 2, 1,
+                                         3)  # [bn, num_heads, 1, c//num_heads]
+        kv = self.kv_linear(pre_kv).reshape(B * N, -1, 2, self.num_heads,
+                                            C // self.num_heads).permute(
+                                                2, 0, 3, 1, 4)
         k, v = kv[0], kv[1]  # [bn, num_heads, num_sector, c//num_heads]
 
         attn = (q @ k.transpose(-2, -1)) * self.scale
 
-        attn = attn.reshape(B, N, self.num_heads, 1,
-                            self.num_sector) + self.relative_bias # you can fuse external factors here as well
-        mask = self.mask.reshape(1, N, 1, 1, self.num_sector)
-
+        attn = attn.reshape(
+            B, N, self.num_heads, 1, self.num_sector
+        ) + self.relative_bias  # you can fuse external factors here as well
+      
+        #将self.mask替换为mask_dynamic
+        # mask = self.mask.reshape(1, N, 1, 1, self.num_sector)
+        mask = mask_dynamic.reshape(1, N, 1, 1, self.num_sector)
         # masking
-        attn = attn.masked_fill_(mask, float(
-            "-inf")).reshape(B * N, self.num_heads, 1, self.num_sector).softmax(dim=-1)
+        attn = attn.masked_fill_(mask, float("-inf")).reshape(
+            B * N, self.num_heads, 1, self.num_sector).softmax(dim=-1)
 
         x = (attn @ v).transpose(1, 2).reshape(B, N, C)
         x = self.proj(x)
@@ -343,28 +434,35 @@ class SpatialAttention(nn.Module):
 
 class DS_MSA(nn.Module):
     # Dartboard Spatial MSA
-    def __init__(self,
-                 dim,  # hidden dimension
-                 depth,  # number of MSA in DS-MSA
-                 heads,  # number of heads
-                 mlp_dim,  # mlp dimension
-                 assignment,  # dartboard assignment matrix
-                 mask,  # mask
-                 dropout=0.):  # dropout rate
+    def __init__(
+            self,
+            dim,  # hidden dimension
+            depth,  # number of MSA in DS-MSA
+            heads,  # number of heads
+            mlp_dim,  # mlp dimension
+            assignment,  # dartboard assignment matrix
+            mask,  # mask
+            device,
+            dropout=0.):  # dropout rate
         super().__init__()
         self.layers = nn.ModuleList([])
         for i in range(depth):
-            self.layers.append(nn.ModuleList([
-                SpatialAttention(dim, heads=heads, dropout=dropout,
-                                 assignment=assignment, mask=mask,
-                                 num_sectors=assignment.shape[-1]),
-                PreNorm(dim, FeedForward(dim, mlp_dim, dropout=dropout))
-            ]))
+            self.layers.append(
+                nn.ModuleList([
+                    SpatialAttention(device,
+                                     dim,
+                                     heads=heads,
+                                     dropout=dropout,
+                                     assignment=assignment,
+                                     mask=mask,
+                                     num_sectors=assignment.shape[-1]),
+                    PreNorm(dim, FeedForward(dim, mlp_dim, dropout=dropout))
+                ]))
 
     def forward(self, x):
         # x: [b, c, n, t]
         b, c, n, t = x.shape
-        x = x.permute(0, 3, 2, 1).reshape(b*t, n, c)  # [b*t, n, c]
+        x = x.permute(0, 3, 2, 1).reshape(b * t, n, c)  # [b*t, n, c]
         # x = x + self.pos_embedding  # [b*t, n, c]  we use relative PE instead
         for attn, ff in self.layers:
             x = attn(x) + x
@@ -374,7 +472,16 @@ class DS_MSA(nn.Module):
 
 
 class TemporalAttention(nn.Module):
-    def __init__(self, dim, heads=2, window_size=1, qkv_bias=False, qk_scale=None, dropout=0., causal=True, device=None):
+
+    def __init__(self,
+                 dim,
+                 heads=2,
+                 window_size=1,
+                 qkv_bias=False,
+                 qk_scale=None,
+                 dropout=0.,
+                 causal=True,
+                 device=None):
         super().__init__()
         assert dim % heads == 0, f"dim {dim} should be divided by num_heads {heads}."
 
@@ -382,7 +489,7 @@ class TemporalAttention(nn.Module):
         self.num_heads = heads
         self.causal = causal
         head_dim = dim // heads
-        self.scale = qk_scale or head_dim ** -0.5
+        self.scale = qk_scale or head_dim**-0.5
         self.window_size = window_size
 
         self.qkv = nn.Linear(dim, dim * 3, bias=qkv_bias)
@@ -400,8 +507,8 @@ class TemporalAttention(nn.Module):
             x = x.reshape(-1, self.window_size, C_prev)  # create local windows
         B, T, C = x.shape
 
-        qkv = self.qkv(x).reshape(B, -1, 3, self.num_heads, C //
-                                  self.num_heads).permute(2, 0, 3, 1, 4)
+        qkv = self.qkv(x).reshape(B, -1, 3, self.num_heads,
+                                  C // self.num_heads).permute(2, 0, 3, 1, 4)
         q, k, v = qkv[0], qkv[1], qkv[2]
 
         # merge key padding and attention masks
@@ -422,32 +529,34 @@ class TemporalAttention(nn.Module):
 
 class CT_MSA(nn.Module):
     # Causal Temporal MSA
-    def __init__(self,
-                 dim,  # hidden dim
-                 depth,  # the number of MSA in CT-MSA
-                 heads,  # the number of heads
-                 window_size,  # the size of local window
-                 mlp_dim,  # mlp dimension
-                 num_time,  # the number of time slot
-                 dropout=0.,  # dropout rate
-                 device=None):  # device, e.g., cuda
+    def __init__(
+            self,
+            dim,  # hidden dim
+            depth,  # the number of MSA in CT-MSA
+            heads,  # the number of heads
+            window_size,  # the size of local window
+            mlp_dim,  # mlp dimension
+            num_time,  # the number of time slot
+            dropout=0.,  # dropout rate
+            device=None):  # device, e.g., cuda
         super().__init__()
         self.pos_embedding = nn.Parameter(torch.randn(1, num_time, dim))
         self.layers = nn.ModuleList([])
         for i in range(depth):
-            self.layers.append(nn.ModuleList([
-                TemporalAttention(dim=dim,
-                                  heads=heads,
-                                  window_size=window_size,
-                                  dropout=dropout,
-                                  device=device),
-                PreNorm(dim, FeedForward(dim, mlp_dim, dropout=dropout))
-            ]))
+            self.layers.append(
+                nn.ModuleList([
+                    TemporalAttention(dim=dim,
+                                      heads=heads,
+                                      window_size=window_size,
+                                      dropout=dropout,
+                                      device=device),
+                    PreNorm(dim, FeedForward(dim, mlp_dim, dropout=dropout))
+                ]))
 
     def forward(self, x):
         # x: [b, c, n, t]
         b, c, n, t = x.shape
-        x = x.permute(0, 2, 3, 1).reshape(b*n, t, c)  # [b*n, t, c]
+        x = x.permute(0, 2, 3, 1).reshape(b * n, t, c)  # [b*n, t, c]
         x = x + self.pos_embedding  # [b*n, t, c]
         for attn, ff in self.layers:
             x = attn(x) + x
@@ -455,8 +564,10 @@ class CT_MSA(nn.Module):
         x = x.reshape(b, n, t, c).permute(0, 3, 1, 2)
         return x
 
+
 # Pre Normalization in Transformer
 class PreNorm(nn.Module):
+
     def __init__(self, dim, fn):
         super().__init__()
         self.norm = nn.LayerNorm(dim)
@@ -465,16 +576,16 @@ class PreNorm(nn.Module):
     def forward(self, x, **kwargs):
         return self.fn(self.norm(x), **kwargs)
 
+
 # FFN in Transformer
 class FeedForward(nn.Module):
+
     def __init__(self, dim, hidden_dim, dropout=0.):
         super().__init__()
-        self.net = nn.Sequential(
-            nn.Linear(dim, hidden_dim),
-            nn.GELU(),
-            nn.Dropout(dropout),
-            nn.Linear(hidden_dim, dim),
-            nn.Dropout(dropout)
-        )
+        self.net = nn.Sequential(nn.Linear(dim, hidden_dim), nn.GELU(),
+                                 nn.Dropout(dropout),
+                                 nn.Linear(hidden_dim,
+                                           dim), nn.Dropout(dropout))
+
     def forward(self, x):
         return self.net(x)
